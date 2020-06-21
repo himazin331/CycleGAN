@@ -22,7 +22,7 @@ class Generator(tf.keras.Model):
 
         input_shape = (256, 256, 3)
 
-        # ダウンサンプリング    
+
         self.pre = [
             kl.Conv2D(64, kernel_size=7, strides=1, 
                     padding="same", input_shape=input_shape),
@@ -37,7 +37,7 @@ class Generator(tf.keras.Model):
             tfa.layers.InstanceNormalization(axis=-1),
             kl.Activation(tf.nn.relu)   
         ]
-
+        
         # Residual Block
         self.res = [
             [
@@ -56,7 +56,7 @@ class Generator(tf.keras.Model):
 
         self.conv1 =kl.Conv2D(3, kernel_size=7, strides=1, padding="same", activation="tanh")
         self.in3 = tfa.layers.InstanceNormalization(axis=-1)
-        self.act3 = kl.Activation(tf.nn.tanh)
+        self.act3 = kl.Activation(tf.nn.relu)
 
     # 順伝播
     def call(self, x):
@@ -79,23 +79,29 @@ class Generator(tf.keras.Model):
 
         return d3
 
-# Pixel Shuffle
-class Pixel_shuffer(tf.keras.Model):
-    def __init__(self, out_ch):
+# Residual Block
+class Res_block(tf.keras.Model):
+    def __init__(self, ch):
         super().__init__()
 
-        input_shape = (256, 256, 64)
 
-        self.conv = kl.Conv2D(out_ch, kernel_size=3, strides=1,
-                            padding="same", input_shape=input_shape)
-        self.act = kl.Activation(tf.nn.relu)
-    
+        self.conv1 = kl.Conv2D(ch, kernel_size=3, strides=1,
+                            padding="same")
+        self.bn1 = kl.BatchNormalization()
+        self.av1 = kl.Activation(tf.nn.relu)
+
+        self.conv2 = kl.Conv2D(ch, kernel_size=3, strides=1,
+                            padding="same")
+        self.bn2 = kl.BatchNormalization()
+        self.av2 = kl.Activation(tf.nn.relu)
+
     # forward proc
     def call(self, x):
 
-        d1 = self.conv(x)
-        d2 = self.act(tf.nn.depth_to_space(d1, 2))
-        return d2
+        d1 = self.av1(self.bn1(self.conv1(x)))
+        d2 = self.av2(self.bn2(self.conv2(d1))
+
+        return x + d2
 
 
 # Discriminator 
@@ -108,29 +114,24 @@ class Discriminator(tf.keras.Model):
 
         self.conv1 = kl.Conv2D(64, kernel_size=4, strides=2,
                             padding="same", input_shape=input_shape)
-        self.act1 = kl.Activation(tf.nn.relu)
+        self.act1 = kl.LeakyReLU(0.2)
 
         self.conv2 = kl.Conv2D(128, kernel_size=4, strides=2,
                             padding="same")
         self.in1 = tfa.layers.InstanceNormalization(axis=-1)
-        self.act2 = kl.LeakyReLU()
+        self.act2 = kl.LeakyReLU(0.2)
 
         self.conv3 = kl.Conv2D(256, kernel_size=4, strides=2,
                             padding="same")
         self.in2 = tfa.layers.InstanceNormalization(axis=-1)
-        self.act3 = kl.LeakyReLU()
+        self.act3 = kl.LeakyReLU(0.2)
 
         self.conv4 = kl.Conv2D(512, kernel_size=4, strides=2,
                             padding="same")
         self.in3 = tfa.layers.InstanceNormalization(axis=-1)
-        self.act4 = kl.LeakyReLU()
+        self.act4 = kl.LeakyReLU(0.2)
 
-        self.conv5 = kl.Conv2D(512, kernel_size=4, strides=1,
-                            padding="same")
-        self.in4 = tfa.layers.InstanceNormalization(axis=-1)
-        self.act5 = kl.LeakyReLU()
-
-        self.conv6 = kl.Conv2D(1, kernel_size=4, strides=1, padding="same")
+        self.conv5 = kl.Conv2D(1, kernel_size=4, strides=1, padding="same")
 
     # forward proc
     def call(self, x):
@@ -139,38 +140,9 @@ class Discriminator(tf.keras.Model):
         d2 = self.act2(self.in1(self.conv2(d1)))
         d3 = self.act3(self.in2(self.conv3(d2)))
         d4 = self.act4(self.in3(self.conv4(d3)))
-        d5 = self.act5(self.in4(self.conv5(d4)))
-        
-        d6 = self.conv6(d5)
+        d5 = self.conv5(d4)
 
-        return d6
-
-
-# Residual Block
-class Res_block(tf.keras.Model):
-    def __init__(self, ch):
-        super().__init__()
-
-        input_shape = (256, 256, 3)
-        
-        self.conv1 = kl.Conv2D(ch, kernel_size=3, strides=1,
-                            padding="same", input_shape=input_shape)
-        self.in1 = tfa.layers.InstanceNormalization(axis=-1)
-        self.av1 = kl.Activation(tf.nn.relu)
-
-        self.conv2 = kl.Conv2D(ch, kernel_size=3, strides=1,
-                            padding="same")
-        self.in2 = tfa.layers.InstanceNormalization(axis=-1)
-
-        self.add = kl.Add()
-
-    # forward proc
-    def call(self, x):
-       
-        d1 = self.av1(self.in1(self.conv1(x)))
-        d2 = self.in2(self.conv2(d1))
-
-        return self.add([x, d2])
+        return d5
 
 # Train
 class trainer():
@@ -239,11 +211,6 @@ class trainer():
             dy_loss_real = self.discriminatorY.train_on_batch(imgs_Y, np.ones((h_batch, 16, 16)))
             dy_loss_fake = self.discriminatorY.train_on_batch(gen_imgs_Y, np.zeros((h_batch, 16, 16)))
             dy_loss = 0.5 * np.add(dy_loss_real, dy_loss_fake)
-
-            idx = np.random.randint(0, tr_X.shape[0], h_batch)
-            imgs_X = tr_X[idx]
-            idx = np.random.randint(0, tr_Y.shape[0], h_batch)
-            imgs_Y = tr_Y[idx]
             
             gen_imgs_X = self.generatorX.predict(imgs_X)
             re_imgs_X = self.generatorY.predict(gen_imgs_X)
